@@ -44,6 +44,21 @@ class LeaderServicer(rpc.ReplicationServicer):
                 if resp.ack:
                     acks += 1
                     print(f"  - ACK received from replica on {REPLICA_ADDRS[i]}")
+                else:
+                    print(f"  - Replica {REPLICA_ADDRS[i]} has inconsistent log. Syncing...")
+                    self.sync_replica(stub, resp.current_offset, i)
+
+                    retry_resp = stub.ReplicateLog(pb.ReplicateRequest(
+                        leader_epoch=self.epoch,
+                        entry=entry,
+                        prev_log_offset=entry.offset - 1,
+                        prev_log_epoch=self.epoch
+                    ), timeout=2)
+
+                    if retry_resp.ack:
+                        print(f"  - ACK received from replica on {REPLICA_ADDRS[i]} after sync")
+                        acks += 1
+
             except grpc.RpcError as e:
                 pass
 
@@ -79,8 +94,30 @@ class LeaderServicer(rpc.ReplicationServicer):
 
         print(f"Leader: Returning committed data: {out}")
         print("--- Leader: Read method finished ---")
-        
+
         return pb.ReadResponse(data=out)
+    
+    def sync_replica(self, stub, current_offset, replica_index):
+        start_offset = current_offset + 1
+        print(f"Leader: Syncing replica {REPLICA_ADDRS[replica_index]} from offset {start_offset}")
+
+        for entry in self.log[start_offset:]:
+            try:
+                resp = stub.ReplicateLog(pb.ReplicateRequest(
+                    leader_epoch=self.epoch,
+                    entry=entry,
+                    prev_log_offset=entry.offset - 1,
+                    prev_log_epoch=self.epoch
+                ), timeout=2)
+
+                if not resp.ack:
+                    print(f"  - Replica {REPLICA_ADDRS[replica_index]} still inconsistent at offset {resp.current_offset}")
+                    self.sync_replica(stub, resp.current_offset, replica_index)
+                    return  
+
+            except grpc.RpcError as e:
+                print(f"  - RPC error during sync with {REPLICA_ADDRS[replica_index]}: {e.details()}")
+                return
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
