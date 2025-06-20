@@ -46,18 +46,11 @@ class LeaderServicer(rpc.ReplicationServicer):
                     print(f"  - ACK received from replica on {REPLICA_ADDRS[i]}")
                 else:
                     print(f"  - Replica {REPLICA_ADDRS[i]} has inconsistent log. Syncing...")
-                    self.sync_replica(stub, resp.current_offset, i)
-
-                    retry_resp = stub.ReplicateLog(pb.ReplicateRequest(
-                        leader_epoch=self.epoch,
-                        entry=entry,
-                        prev_log_offset=entry.offset - 1,
-                        prev_log_epoch=self.epoch
-                    ), timeout=2)
-
-                    if retry_resp.ack:
-                        print(f"  - ACK received from replica on {REPLICA_ADDRS[i]} after sync")
+                    if self.sync_replica(stub, resp.current_offset, i):
+                        print(f"  - Sync successful for replica on {REPLICA_ADDRS[i]}")
                         acks += 1
+                    else:
+                        print(f"  - Sync failed for replica on {REPLICA_ADDRS[i]}")
 
             except grpc.RpcError as e:
                 pass
@@ -112,12 +105,13 @@ class LeaderServicer(rpc.ReplicationServicer):
 
                 if not resp.ack:
                     print(f"  - Replica {REPLICA_ADDRS[replica_index]} still inconsistent at offset {resp.current_offset}")
-                    self.sync_replica(stub, resp.current_offset, replica_index)
-                    return  
+                    return self.sync_replica(stub, resp.current_offset, replica_index)
 
             except grpc.RpcError as e:
                 print(f"  - RPC error during sync with {REPLICA_ADDRS[replica_index]}: {e.details()}")
-                return
+                return False
+
+        return True
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))

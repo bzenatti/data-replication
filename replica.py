@@ -17,7 +17,9 @@ class ReplicaServicer(rpc.ReplicationServicer):
     def ReplicateLog(self, request, context):
         with self.lock:
             print("\n--- Replica: ReplicateLog method called ---")
-            print(f"Replica Log (before): {self.log}")
+            print(f"Replica Log (before): ")
+            print_log(self.log)
+
             print(f"Replica DB (before): {self.db}")
             prev_ok = (
                 request.prev_log_offset == len(self.log)-1 and
@@ -33,8 +35,9 @@ class ReplicaServicer(rpc.ReplicationServicer):
                 )
             print("Replica: Consistent log. Appending entry.")
             self.log.append(request.entry)
-            
-            print(f"Replica Log (after append): {self.log}")
+
+            print(f"Replica Log (after append):")
+            print_log(self.log)
             print(f"Replica DB (after append): {self.db}")
             print("--- Replica: ReplicateLog method finished ---")
 
@@ -46,7 +49,8 @@ class ReplicaServicer(rpc.ReplicationServicer):
     def CommitLog(self, request, context):
         with self.lock:
             print("\n--- Replica: CommitLog method called ---")
-            print(f"Replica Log (before commit): {self.log}")
+            print(f"Replica Log (before commit):")
+            print_log(self.log)
             print(f"Replica DB (before commit): {self.db}")
 
             for entry in self.log:
@@ -54,10 +58,20 @@ class ReplicaServicer(rpc.ReplicationServicer):
                 if key not in self.db and entry.offset <= request.commit_offset:
                     self.db[key] = entry.data
 
-            print(f"Replica Log (after commit): {self.log}")
+            print(f"Replica Log (after commit):")
+            print_log(self.log)
             print(f"Replica DB (after commit): {self.db}")
             print("--- Replica: CommitLog method finished ---")
             return pb.CommitResponse(success=True)
+
+def print_log(log):
+    if not log:
+        print("Log: [empty]")
+        return
+    print("Log:")
+    for entry in log:
+        print(f"  - [Epoch: {entry.epoch} | Offset: {entry.offset} | Data: \"{entry.data}\"]")
+
 
 def serve(port):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
