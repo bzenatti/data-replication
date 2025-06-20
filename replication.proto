@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package replication;
+
+service Replication {
+    // Client
+    rpc Write(WriteRequest) returns (WriteResponse) {}
+    rpc Read(ReadRequest) returns (ReadResponse) {}
+
+    // Leader 
+    rpc ReplicateLog(ReplicateRequest) returns (ReplicateResponse) {}
+    rpc CommitLog(CommitRequest) returns (CommitResponse) {}
+}
+
+message WriteRequest {
+    // Data is a simple string
+    string data = 1;
+}
+
+message WriteResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ReadRequest {
+}
+
+message ReadResponse {
+    map<string, string> data = 1;
+}
+
+message LogEntry {
+    int32 epoch = 1;
+    int32 offset = 2; 
+    string data = 3;
+}
+
+message ReplicateRequest {
+    int32 leader_epoch = 1;
+    LogEntry entry = 2;
+    int32 prev_log_offset = 3;
+    int32 prev_log_epoch = 4;
+}
+
+message ReplicateResponse {
+    bool ack = 1;
+    int32 current_offset = 2;
+}
+
+message CommitRequest {
+    int32 leader_epoch = 1;
+    int32 commit_offset = 2;
+}
+
+message CommitResponse {
+    bool success = 1;
+}
