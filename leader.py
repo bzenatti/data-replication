@@ -1,5 +1,4 @@
 from concurrent import futures
-
 import grpc
 import replication_pb2 as pb
 import replication_pb2_grpc as rpc
@@ -14,22 +13,28 @@ QUORUM = (len(REPLICA_ADDRS) // 2) + 1
 class LeaderServicer(rpc.ReplicationServicer):
     def __init__(self):
         self.epoch = 1
-        self.log = []  
+        self.log = []
         self.committed_offset = -1
         self.replicas = [rpc.ReplicationStub(grpc.insecure_channel(addr)) for addr in REPLICA_ADDRS]
+        print("Leader initialized")
+        print(f"Initial Log: {self.log}")
+        print(f"Initial Committed Offset: {self.committed_offset}")
 
     def Write(self, request, context):
+        print("\n--- Leader: Write method called ---")
         entry = pb.LogEntry(
             epoch=self.epoch,
             offset=len(self.log),
             data=request.data
         )
         self.log.append(entry)
-        # Push to replicas
+        print(f"Leader Log updated (entry added): {self.log}")
+
         acks = 0
-        responses = []
-        for stub in self.replicas:
+        print("Leader: Pushing log entry to replicas...")
+        for i, stub in enumerate(self.replicas):
             try:
+                print(f"  - Replicating to replica on {REPLICA_ADDRS[i]}")
                 resp = stub.ReplicateLog(pb.ReplicateRequest(
                     leader_epoch=self.epoch,
                     entry=entry,
@@ -38,29 +43,43 @@ class LeaderServicer(rpc.ReplicationServicer):
                 ), timeout=2)
                 if resp.ack:
                     acks += 1
-            except grpc.RpcError:
+                    print(f"  - ACK received from replica on {REPLICA_ADDRS[i]}")
+            except grpc.RpcError as e:
                 pass
 
-        # Wait for quorum
+        print(f"Leader: Total ACKs received: {acks}/{len(self.replicas)}")
+
         if acks < QUORUM:
+            print("Leader: Failed to achieve quorum. Write unsuccessful.")
             return pb.WriteResponse(success=False, message="Failed to replicate to quorum")
-        
-        # Commit
+
+        print("Leader: Quorum achieved. Sending commit order to replicas.")
         self.committed_offset = entry.offset
-        for stub in self.replicas:
+        print(f"Leader committed offset updated to: {self.committed_offset}")
+
+        for i, stub in enumerate(self.replicas):
             try:
+                print(f"  - Sending commit to replica on {REPLICA_ADDRS[i]}")
                 stub.CommitLog(pb.CommitRequest(
                     leader_epoch=self.epoch,
                     commit_offset=entry.offset
                 ), timeout=2)
-            except grpc.RpcError:
+            except grpc.RpcError as e:
+                print(f"  - RPC error during commit with replica on {REPLICA_ADDRS[i]}: {e.details()}")
                 pass
+
+        print("--- Leader: Write method finished ---")
         return pb.WriteResponse(success=True, message=f"Committed at offset {entry.offset}")
 
     def Read(self, request, context):
+        print("\n--- Leader: Read method called ---")
         out = {}
         for e in self.log[:self.committed_offset+1]:
             out[f"{e.epoch}:{e.offset}"] = e.data
+
+        print(f"Leader: Returning committed data: {out}")
+        print("--- Leader: Read method finished ---")
+        
         return pb.ReadResponse(data=out)
 
 def serve():

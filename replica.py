@@ -1,6 +1,5 @@
 import threading
 from concurrent import futures
-
 import grpc
 import replication_pb2 as pb
 import replication_pb2_grpc as rpc
@@ -8,26 +7,33 @@ import replication_pb2_grpc as rpc
 class ReplicaServicer(rpc.ReplicationServicer):
     def __init__(self):
         self.epoch = 1
-        self.log = []           
-        self.db = {}            
+        self.log = []
+        self.db = {}
         self.lock = threading.Lock()
+        print("Replica initialized")
+        print(f"Initial Log: {self.log}")
+        print(f"Initial DB: {self.db}")
 
-    # Leader → Replica
     def ReplicateLog(self, request, context):
         with self.lock:
+            print("\n--- Replica: ReplicateLog method called ---")
+            print(f"Replica Log (before): {self.log}")
             prev_ok = (
                 request.prev_log_offset == len(self.log)-1 and
                 request.prev_log_epoch  == self.epoch
             )
             if not prev_ok:
-                # conflict: truncate and report current state
+                print("Replica: Inconsistent log detected. Truncating...")
                 self.log = self.log[:request.prev_log_offset+1]
+                print(f"Replica Log (after truncation): {self.log}")
                 return pb.ReplicateResponse(
                     ack=False,
                     current_offset=len(self.log)-1
                 )
-            # append intermediate
+            print("Replica: Consistent log. Appending entry.")
             self.log.append(request.entry)
+            print(f"Replica Log (after append): {self.log}")
+            print("--- Replica: ReplicateLog method finished ---")
             return pb.ReplicateResponse(
                 ack=True,
                 current_offset=request.entry.offset
@@ -35,12 +41,17 @@ class ReplicaServicer(rpc.ReplicationServicer):
 
     def CommitLog(self, request, context):
         with self.lock:
-            # commit up to commit_offset
+            print("\n--- Replica: CommitLog method called ---")
+            print(f"Replica DB (before commit): {self.db}")
+            
             for entry in self.log:
                 key = f"{entry.epoch}:{entry.offset}"
                 if key not in self.db and entry.offset <= request.commit_offset:
                     self.db[key] = entry.data
-            return pb.CommitResponse(success=True)    
+
+            print(f"Replica DB (after commit): {self.db}")
+            print("--- Replica: CommitLog method finished ---")
+            return pb.CommitResponse(success=True)
 
 def serve(port):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
