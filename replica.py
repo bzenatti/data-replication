@@ -19,8 +19,8 @@ class ReplicaServicer(rpc.ReplicationServicer):
             print("\n--- Replica: ReplicateLog method called ---")
             print(f"Replica Log (before): ")
             print_log(self.log)
-
             print(f"Replica DB (before): {self.db}")
+            
             prev_ok = (
                 request.prev_log_offset == len(self.log)-1 and
                 request.prev_log_epoch  == self.epoch
@@ -53,6 +53,8 @@ class ReplicaServicer(rpc.ReplicationServicer):
             print_log(self.log)
             print(f"Replica DB (before commit): {self.db}")
 
+            #SIMULATE HERE IF USER DON'T WANT TO COMMIT
+            
             for entry in self.log:
                 key = f"{entry.epoch}:{entry.offset}"
                 if key not in self.db and entry.offset <= request.commit_offset:
