@@ -53,8 +53,12 @@ class ReplicaServicer(rpc.ReplicationServicer):
             print_log(self.log)
             print(f"Replica DB (before commit): {self.db}")
 
-            #SIMULATE HERE IF USER DON'T WANT TO COMMIT
-            
+            wantCommit = input("Type anything to commit or 'n' to not commit")
+
+            if(wantCommit.lower() == 'n'):
+                print("--- Leader: Didn`t commit the message ---")
+                return pb.CommitResponse(success=True)
+                
             for entry in self.log:
                 key = f"{entry.epoch}:{entry.offset}"
                 if key not in self.db and entry.offset <= request.commit_offset:

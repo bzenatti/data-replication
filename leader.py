@@ -14,7 +14,7 @@ class LeaderServicer(rpc.ReplicationServicer):
     def __init__(self):
         self.epoch = 1
         self.log = []
-        #FAZER UM self.db PRA COMMITAR AQUI
+        self.db = {}
         self.committed_offset = -1
         self.replicas = [rpc.ReplicationStub(grpc.insecure_channel(addr)) for addr in REPLICA_ADDRS]
         print("Leader initialized")
@@ -29,7 +29,7 @@ class LeaderServicer(rpc.ReplicationServicer):
             data=request.data
         )
         self.log.append(entry)
-        print(f"Leader Log updated (entry added): {self.log}")
+        print_log(self.log)
 
         acks = 0
         print("Leader: Pushing log entry to replicas...")
@@ -72,13 +72,20 @@ class LeaderServicer(rpc.ReplicationServicer):
             print("--- Leader: Didn`t commit the message ---")
             return pb.WriteResponse(success=True, message=f"Not commited on replicas")
 
+        self.committed_offset = entry.offset
+
+        for log_entry in self.log: 
+            key = f"{log_entry.epoch}:{log_entry.offset}"
+            if key not in self.db and log_entry.offset <= self.committed_offset:
+                self.db[key] = log_entry.data
+
         for i, stub in enumerate(self.replicas):
             try:
                 print(f"  - Sending commit to replica on {REPLICA_ADDRS[i]}")
                 stub.CommitLog(pb.CommitRequest(
                     leader_epoch=self.epoch,
                     commit_offset=entry.offset
-                ), timeout=2)
+                ), timeout=20)
             except grpc.RpcError as e:
                 print(f"  - RPC error during commit with replica on {REPLICA_ADDRS[i]}: {e.details()}")
                 pass
@@ -88,14 +95,10 @@ class LeaderServicer(rpc.ReplicationServicer):
 
     def Read(self, request, context):
         print("\n--- Leader: Read method called ---")
-        out = {}
-        for e in self.log[:self.committed_offset+1]:
-            out[f"{e.epoch}:{e.offset}"] = e.data
-
-        print(f"Leader: Returning committed data: {out}")
+        print(f"Leader: Returning committed data: {self.db}")
         print("--- Leader: Read method finished ---")
 
-        return pb.ReadResponse(data=out)
+        return pb.ReadResponse(data=self.db)
     
     def sync_replica(self, stub, current_offset, replica_index):
         start_offset = current_offset + 1
@@ -119,6 +122,14 @@ class LeaderServicer(rpc.ReplicationServicer):
                 return False
 
         return True
+
+def print_log(log):
+    if not log:
+        print("Log: [empty]")
+        return
+    print("Log:")
+    for entry in log:
+        print(f"  - [Epoch: {entry.epoch} | Offset: {entry.offset} | Data: \"{entry.data}\"]")
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
