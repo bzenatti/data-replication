@@ -14,7 +14,7 @@ class LeaderServicer(rpc.ReplicationServicer):
     def __init__(self):
         self.epoch = 1
         self.log = []
-        self.db = {}
+        self.db = {}        #Persistir os dadossss escrever em arquivo
         self.committed_offset = -1
         self.replicas = [rpc.ReplicationStub(grpc.insecure_channel(addr)) for addr in REPLICA_ADDRS]
         print("Leader initialized")
@@ -63,13 +63,12 @@ class LeaderServicer(rpc.ReplicationServicer):
             return pb.WriteResponse(success=False, message="Failed to replicate to quorum")
 
         print("Leader: Quorum achieved. Sending commit order to replicas.")
-        self.committed_offset = entry.offset
-        print(f"Leader committed offset updated to: {self.committed_offset}")
 
-        wantCommit = input("Type anything to commit or 'n' to not commit (on replicas)")
+        wantCommit = input("Type anything to commit or 'n' to not commit")
 
         if(wantCommit.lower() == 'n'):
             print("--- Leader: Didn`t commit the message ---")
+            self.log.pop()
             return pb.WriteResponse(success=True, message=f"Not commited on replicas")
 
         self.committed_offset = entry.offset

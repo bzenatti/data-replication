@@ -21,10 +21,8 @@ class ReplicaServicer(rpc.ReplicationServicer):
             print_log(self.log)
             print(f"Replica DB (before): {self.db}")
             
-            prev_ok = (
-                request.prev_log_offset == len(self.log)-1 and
-                request.prev_log_epoch  == self.epoch
-            )
+            prev_ok = (request.prev_log_offset == len(self.log)-1 and request.prev_log_epoch  == self.epoch)
+
             if not prev_ok:
                 print("Replica: Inconsistent log detected. Truncating...")
                 self.log = self.log[:request.prev_log_offset+1]
@@ -57,6 +55,7 @@ class ReplicaServicer(rpc.ReplicationServicer):
 
             if(wantCommit.lower() == 'n'):
                 print("--- Leader: Didn`t commit the message ---")
+                
                 return pb.CommitResponse(success=True)
                 
             for entry in self.log:
