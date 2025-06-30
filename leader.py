@@ -2,6 +2,8 @@ from concurrent import futures
 import grpc
 import replication_pb2 as pb
 import replication_pb2_grpc as rpc
+import json
+import os
 
 REPLICA_ADDRS = [
     'localhost:50051',
@@ -9,17 +11,51 @@ REPLICA_ADDRS = [
     'localhost:50053',
 ]
 QUORUM = (len(REPLICA_ADDRS) // 2) + 1
+LEADER_PORT = 50050
 
 class LeaderServicer(rpc.ReplicationServicer):
     def __init__(self):
         self.epoch = 1
         self.log = []
-        self.db = {}        #Persistir os dadossss escrever em arquivo
+        self.db = {}
         self.committed_offset = -1
         self.replicas = [rpc.ReplicationStub(grpc.insecure_channel(addr)) for addr in REPLICA_ADDRS]
+
+        log_dir = "logs"
+        db_dir = "dbs"
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(db_dir, exist_ok=True)
+
+        self.log_file = os.path.join(log_dir, f"log_{LEADER_PORT}.json")
+        self.db_file = os.path.join(db_dir, f"db_{LEADER_PORT}.json")
+        self._load_state()
+
         print("Leader initialized")
-        print(f"Initial Log: {self.log}")
+        print(f"Initial Log:")
+        print_log(self.log)
         print(f"Initial Committed Offset: {self.committed_offset}")
+        print(f"Initial DB: {self.db}")
+
+    def _load_state(self):
+        if os.path.exists(self.log_file):
+            with open(self.log_file, 'r') as f:
+                log_data = json.load(f)
+                self.log = [pb.LogEntry(**entry) for entry in log_data]
+        if os.path.exists(self.db_file):
+            with open(self.db_file, 'r') as f:
+                self.db = json.load(f)
+
+    def _save_state(self,state):
+        log_to_save = [
+            {'epoch': entry.epoch, 'offset': entry.offset, 'data': entry.data}
+            for entry in self.log
+        ]
+        if state == "log":
+            with open(self.log_file, 'w') as f:
+                json.dump(log_to_save, f, indent=4)
+        else:
+            with open(self.db_file, 'w') as f:
+                json.dump(self.db, f, indent=4)
 
     def Write(self, request, context):
         print("\n--- Leader: Write method called ---")
@@ -30,6 +66,7 @@ class LeaderServicer(rpc.ReplicationServicer):
         )
         self.log.append(entry)
         print_log(self.log)
+        self._save_state("log") 
 
         acks = 0
         print("Leader: Pushing log entry to replicas...")
@@ -77,6 +114,8 @@ class LeaderServicer(rpc.ReplicationServicer):
             key = f"{log_entry.epoch}:{log_entry.offset}"
             if key not in self.db and log_entry.offset <= self.committed_offset:
                 self.db[key] = log_entry.data
+        
+        self._save_state("db") 
 
         for i, stub in enumerate(self.replicas):
             try:
@@ -133,9 +172,9 @@ def print_log(log):
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     rpc.add_ReplicationServicer_to_server(LeaderServicer(), server)
-    server.add_insecure_port('[::]:50050')
+    server.add_insecure_port(f'[::]:{LEADER_PORT}')
     server.start()
-    print("Leader running on :50050")
+    print(f"Leader running on :{LEADER_PORT}")
     try:
         server.wait_for_termination()
     except KeyboardInterrupt:
